@@ -58,24 +58,32 @@ def load_rpa_data():
 def load_functional_area_data():
     fa_df = pd.read_excel("Automation Savings New.xlsx")
 
-    # Normalize column names
+    # Normalize column names safely
     fa_df.columns = (
         fa_df.columns
+        .astype(str)
         .str.replace("\n", " ", regex=False)
+        .str.replace(r"\s+", " ", regex=True)
         .str.strip()
         .str.lower()
     )
 
-    # Identify savings columns with years
+    # Explicitly detect year-based savings columns (2019–2026)
     savings_cols = [
         col for col in fa_df.columns
-        if "savings" in col and any(char.isdigit() for char in col)
+        if (
+            ("savings" in col)
+            and any(year in col for year in ["2019","2020","2021","2022","2023","2024","2025","2026"])
+            and "cumulative" not in col
+        )
     ]
 
-    if not savings_cols:
-        raise ValueError("No yearly savings columns found in Automation Savings New.xlsx")
+    if len(savings_cols) == 0:
+        st.error("Detected columns:")
+        st.write(fa_df.columns.tolist())
+        raise ValueError("No yearly savings columns detected. Check Excel headers.")
 
-    # Convert wide → long
+    # Convert WIDE → LONG
     long_df = fa_df.melt(
         id_vars=["functional area"],
         value_vars=savings_cols,
@@ -83,17 +91,21 @@ def load_functional_area_data():
         value_name="cost_savings"
     )
 
-    # Extract year
+    # Extract numeric year safely
     long_df["year"] = (
         long_df["year_label"]
-        .str.extract(r"(\d{4})")
-        .astype(float)
-        .astype("Int64")
+        .str.extract(r"(20\d{2})")[0]
+        .astype(int)
     )
 
-    long_df["cost_savings"] = pd.to_numeric(long_df["cost_savings"], errors="coerce")
+    long_df["cost_savings"] = pd.to_numeric(
+        long_df["cost_savings"], errors="coerce"
+    )
 
-    return long_df.rename(columns={"functional area": "functional_area"})
+    return long_df.rename(
+        columns={"functional area": "functional_area"}
+    )
+
 
 # --------------------------------------------------
 # LOAD DATA
