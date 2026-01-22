@@ -1,8 +1,6 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
-import numpy as np
 from io import BytesIO
 from datetime import datetime
 
@@ -39,71 +37,51 @@ h2 { color: #2563eb; text-align: center; }
 def load_rpa_data():
     df = pd.read_excel("RPA_Metrics_Dashboard.xlsx")
 
-    df['Date'] = pd.to_datetime(
-        df['Run_Year'].astype(str) + "-" + df['Run_Month'].astype(str) + "-01"
+    df["Date"] = pd.to_datetime(
+        df["Run_Year"].astype(str) + "-" + df["Run_Month"].astype(str) + "-01"
     )
-    df['Quarter'] = df['Date'].dt.quarter
-    df['Year_Quarter'] = df['Run_Year'].astype(str) + " Q" + df['Quarter'].astype(str)
-    df['Year_Month'] = df['Run_Year'].astype(str) + "-" + df['Month']
+    df["Year_Month"] = df["Run_Year"].astype(str) + "-" + df["Month"]
 
-    df['Cost_Savings_Dollars'] = pd.to_numeric(df['Cost_Savings_Dollars'], errors="coerce")
-    df['Manual_Hours_Saved'] = pd.to_numeric(df['Manual_Hours_Saved'], errors="coerce")
+    df["Cost_Savings_Dollars"] = pd.to_numeric(
+        df["Cost_Savings_Dollars"], errors="coerce"
+    )
+    df["Manual_Hours_Saved"] = pd.to_numeric(
+        df["Manual_Hours_Saved"], errors="coerce"
+    )
 
     return df
 
 # --------------------------------------------------
-# LOAD FUNCTIONAL AREA SAVINGS (NEW FILE)
+# LOAD FUNCTIONAL AREA SAVINGS (UPDATED SCHEMA)
 # --------------------------------------------------
 @st.cache_data
 def load_functional_area_data():
     fa_df = pd.read_excel("Automation Savings New.xlsx")
 
-    # Normalize column names safely
-    fa_df.columns = (
-        fa_df.columns
-        .astype(str)
-        .str.replace("\n", " ", regex=False)
-        .str.replace(r"\s+", " ", regex=True)
-        .str.strip()
-        .str.lower()
-    )
-
-    # Explicitly detect year-based savings columns (2019–2026)
-    savings_cols = [
+    # Identify numeric year columns only (2019–2025)
+    year_columns = [
         col for col in fa_df.columns
-        if (
-            ("savings" in col)
-            and any(year in col for year in ["2019","2020","2021","2022","2023","2024","2025","2026"])
-            and "cumulative" not in col
-        )
+        if isinstance(col, int) and 2019 <= col <= 2025
     ]
 
-    if len(savings_cols) == 0:
-        st.error("Detected columns:")
-        st.write(fa_df.columns.tolist())
-        raise ValueError("No yearly savings columns detected. Check Excel headers.")
+    if not year_columns:
+        raise ValueError("No numeric year columns (2019–2025) found.")
 
     # Convert WIDE → LONG
     long_df = fa_df.melt(
-        id_vars=["functional area"],
-        value_vars=savings_cols,
-        var_name="year_label",
+        id_vars=["Functional_Area"],
+        value_vars=year_columns,
+        var_name="year",
         value_name="cost_savings"
     )
 
-    # Extract numeric year safely
-    long_df["year"] = (
-        long_df["year_label"]
-        .str.extract(r"(20\d{2})")[0]
-        .astype(int)
-    )
-
+    long_df["year"] = long_df["year"].astype(int)
     long_df["cost_savings"] = pd.to_numeric(
         long_df["cost_savings"], errors="coerce"
     )
 
     return long_df.rename(
-        columns={"functional area": "functional_area"}
+        columns={"Functional_Area": "functional_area"}
     )
 
 # --------------------------------------------------
@@ -117,14 +95,14 @@ fa_df = load_functional_area_data()
 # --------------------------------------------------
 st.sidebar.title("🎯 Dashboard Filters")
 
-years = sorted(df['Run_Year'].unique())
+years = sorted(df["Run_Year"].unique())
 selected_years = st.sidebar.multiselect(
     "📅 Select Year(s)",
     years,
     default=years
 )
 
-business_areas = ['All'] + sorted(df['Business_Area'].unique())
+business_areas = ["All"] + sorted(df["Business_Area"].unique())
 selected_business_area = st.sidebar.selectbox(
     "🏢 Business Area",
     business_areas
@@ -133,7 +111,7 @@ selected_business_area = st.sidebar.selectbox(
 st.sidebar.markdown("---")
 st.sidebar.subheader("📌 Functional Area Savings")
 
-fa_years = sorted(fa_df['year'].dropna().unique())
+fa_years = sorted(fa_df["year"].unique())
 selected_fa_year = st.sidebar.selectbox(
     "Select Savings Year",
     fa_years,
@@ -146,10 +124,12 @@ selected_fa_year = st.sidebar.selectbox(
 filtered_df = df.copy()
 
 if selected_years:
-    filtered_df = filtered_df[filtered_df['Run_Year'].isin(selected_years)]
+    filtered_df = filtered_df[filtered_df["Run_Year"].isin(selected_years)]
 
-if selected_business_area != 'All':
-    filtered_df = filtered_df[filtered_df['Business_Area'] == selected_business_area]
+if selected_business_area != "All":
+    filtered_df = filtered_df[
+        filtered_df["Business_Area"] == selected_business_area
+    ]
 
 # --------------------------------------------------
 # KPI SECTION
@@ -159,11 +139,11 @@ st.markdown("### Executive Performance Overview")
 
 c1, c2, c3, c4, c5 = st.columns(5)
 
-total_exec = filtered_df['Total_Executions'].sum()
-total_hours = filtered_df['Manual_Hours_Saved'].sum()
-total_savings = filtered_df['Cost_Savings_Dollars'].sum()
+total_exec = filtered_df["Total_Executions"].sum()
+total_hours = filtered_df["Manual_Hours_Saved"].sum()
+total_savings = filtered_df["Cost_Savings_Dollars"].sum()
 success_rate = (
-    filtered_df['Successful_Executions'].sum() / total_exec * 100
+    filtered_df["Successful_Executions"].sum() / total_exec * 100
     if total_exec > 0 else 0
 )
 
@@ -171,7 +151,7 @@ c1.metric("📊 Total Executions", f"{total_exec:,}")
 c2.metric("⏱️ Hours Saved", f"{total_hours:,.0f}")
 c3.metric("💰 Cost Savings", f"${total_savings:,.0f}")
 c4.metric("✅ Success Rate", f"{success_rate:.1f}%")
-c5.metric("⚙️ Active Processes", filtered_df['Process_Name'].nunique())
+c5.metric("⚙️ Active Processes", filtered_df["Process_Name"].nunique())
 
 st.markdown("---")
 
@@ -180,14 +160,14 @@ st.markdown("---")
 # --------------------------------------------------
 trend_df = (
     filtered_df
-    .groupby('Year_Month', as_index=False)['Cost_Savings_Dollars']
+    .groupby("Year_Month", as_index=False)["Cost_Savings_Dollars"]
     .sum()
 )
 
 fig_trend = px.line(
     trend_df,
-    x='Year_Month',
-    y='Cost_Savings_Dollars',
+    x="Year_Month",
+    y="Cost_Savings_Dollars",
     title="Cost Savings Trend",
     markers=True,
     template="plotly_white"
@@ -204,14 +184,14 @@ col1, col2 = st.columns(2)
 with col1:
     ba_exec = (
         filtered_df
-        .groupby('Business_Area', as_index=False)['Total_Executions']
+        .groupby("Business_Area", as_index=False)["Total_Executions"]
         .sum()
     )
 
     fig_ba = px.pie(
         ba_exec,
-        names='Business_Area',
-        values='Total_Executions',
+        names="Business_Area",
+        values="Total_Executions",
         title="Executions by Business Area",
         template="plotly_white"
     )
@@ -220,41 +200,40 @@ with col1:
 with col2:
     app_savings = (
         filtered_df
-        .groupby('Application', as_index=False)['Cost_Savings_Dollars']
+        .groupby("Application", as_index=False)["Cost_Savings_Dollars"]
         .sum()
-        .sort_values('Cost_Savings_Dollars', ascending=False)
+        .sort_values("Cost_Savings_Dollars", ascending=False)
         .head(8)
     )
 
     fig_app = px.pie(
         app_savings,
-        names='Application',
-        values='Cost_Savings_Dollars',
+        names="Application",
+        values="Cost_Savings_Dollars",
         title="Cost Savings by Application (Top 8)",
         template="plotly_white"
     )
-    fig_app.update_yaxes(tickprefix="$")
     st.plotly_chart(fig_app, use_container_width=True)
 
 # --------------------------------------------------
-# 🔥 FUNCTIONAL AREA SAVINGS PIE (NEW EXCEL)
+# FUNCTIONAL AREA SAVINGS PIE
 # --------------------------------------------------
 st.markdown("---")
 st.markdown("## 🥧 Functional Area Cost Savings")
 
-fa_filtered = fa_df[fa_df['year'] == selected_fa_year]
+fa_filtered = fa_df[fa_df["year"] == selected_fa_year]
 
 fa_pie_data = (
     fa_filtered
-    .groupby('functional_area', as_index=False)['cost_savings']
+    .groupby("functional_area", as_index=False)["cost_savings"]
     .sum()
-    .sort_values('cost_savings', ascending=False)
+    .sort_values("cost_savings", ascending=False)
 )
 
 fig_fa = px.pie(
     fa_pie_data,
-    names='functional_area',
-    values='cost_savings',
+    names="functional_area",
+    values="cost_savings",
     title=f"Cost Savings by Functional Area – {selected_fa_year}",
     template="plotly_white",
     color_discrete_sequence=px.colors.qualitative.Bold
