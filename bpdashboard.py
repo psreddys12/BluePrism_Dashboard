@@ -195,7 +195,7 @@ def load_rpa_data():
 def load_savings_data():
     """Load savings by functional area data - ALL COST/SAVINGS DATA"""
     try:
-        df = pd.read_excel('Savings_By_Functional_Area.xlsx')
+        df = pd.read_excel('Automation_Savings.xlsx')
         
         # Validate data
         if 'Functional Area' not in df.columns:
