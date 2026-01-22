@@ -106,7 +106,6 @@ def load_functional_area_data():
         columns={"functional area": "functional_area"}
     )
 
-
 # --------------------------------------------------
 # LOAD DATA
 # --------------------------------------------------
