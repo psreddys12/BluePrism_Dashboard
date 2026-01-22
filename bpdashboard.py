@@ -158,23 +158,44 @@ st.markdown("""
 # ============================================================================
 # DATA LOADING FUNCTIONS WITH ERROR HANDLING
 # ============================================================================
+
+# File upload option
+st.sidebar.markdown("---")
+st.sidebar.markdown("### 📁 File Upload (Optional)")
+uploaded_rpa = st.sidebar.file_uploader("Upload RPA Metrics", type=['xlsx'], key='rpa')
+uploaded_savings = st.sidebar.file_uploader("Upload Savings Data", type=['xlsx'], key='savings')
+st.sidebar.markdown("---")
+
 @st.cache_data(ttl=300)  # Cache for 5 minutes
-def load_rpa_data():
+def load_rpa_data(uploaded_file=None):
     """Load RPA automation metrics data - NO COST DATA"""
     try:
-        df = pd.read_excel('RPA_Metrics_Dashboard.xlsx')
+        # Try uploaded file first, then local file
+        if uploaded_file is not None:
+            df = pd.read_excel(uploaded_file)
+        else:
+            df = pd.read_excel('RPA_Metrics_Dashboard.xlsx')
+        
+        # Strip whitespace from column names
+        df.columns = df.columns.str.strip()
         
         # Data validation
         required_columns = ['Run_Year', 'Run_Month', 'Manual_Hours_Saved', 'Total_Executions']
         missing_cols = [col for col in required_columns if col not in df.columns]
         if missing_cols:
-            st.error(f"Missing required columns: {missing_cols}")
+            st.error(f"❌ Missing required columns: {missing_cols}")
+            st.info(f"Available columns: {df.columns.tolist()}")
             return pd.DataFrame()
         
         # Data cleaning and preparation
         df['Date'] = pd.to_datetime(df['Run_Year'].astype(str) + '-' + df['Run_Month'].astype(str) + '-01')
         df['Quarter'] = df['Date'].dt.quarter
         df['Year_Quarter'] = df['Run_Year'].astype(str) + ' Q' + df['Quarter'].astype(str)
+        
+        # Handle Month column - create if missing
+        if 'Month' not in df.columns:
+            df['Month'] = df['Date'].dt.strftime('%b')
+        
         df['Year_Month'] = df['Run_Year'].astype(str) + '-' + df['Month']
         df['Week'] = df['Date'].dt.isocalendar().week
         
@@ -185,44 +206,116 @@ def load_rpa_data():
         
         return df
     except FileNotFoundError:
-        st.error("❌ RPA_Metrics_Dashboard.xlsx not found. Please upload the file.")
+        st.error("❌ RPA_Metrics_Dashboard.xlsx not found.")
+        st.info("💡 Please upload the file using the sidebar or place it in the same directory as this script.")
         return pd.DataFrame()
     except Exception as e:
         st.error(f"❌ Error loading RPA data: {str(e)}")
+        with st.expander("Show error details"):
+            st.exception(e)
         return pd.DataFrame()
 
 @st.cache_data(ttl=300)
-def load_savings_data():
+def load_savings_data(uploaded_file=None):
     """Load savings by functional area data - ALL COST/SAVINGS DATA"""
     try:
-        df = pd.read_excel('Automation_Savings.xlsx')
+        # Try uploaded file first, then local file
+        if uploaded_file is not None:
+            df = pd.read_excel(uploaded_file)
+        else:
+            df = pd.read_excel('Automation_Savings.xlsx')
+        
+        # Strip whitespace from column names
+        df.columns = df.columns.str.strip()
+        
+        # Debug info (shown in expander)
+        col_list = df.columns.tolist()
+        
+        # Try to find the functional area column (case-insensitive)
+        functional_area_col = None
+        for col in df.columns:
+            if 'functional' in col.lower() and 'area' in col.lower():
+                functional_area_col = col
+                break
+        
+        if functional_area_col and functional_area_col != 'Functional Area':
+            df.rename(columns={functional_area_col: 'Functional Area'}, inplace=True)
         
         # Validate data
         if 'Functional Area' not in df.columns:
-            st.error("❌ Invalid savings data format")
+            st.error(f"❌ 'Functional Area' column not found.")
+            st.info(f"💡 Available columns: {col_list}")
+            st.warning("Please ensure your Excel file has a column named 'Functional Area'")
             return pd.DataFrame()
+        
+        # Clean all numeric columns
+        for col in df.columns:
+            if col != 'Functional Area' and 'Savings' in col:
+                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
         
         return df
     except FileNotFoundError:
-        st.error("❌ Savings_By_Functional_Area.xlsx not found. Please upload the file.")
+        st.error("❌ Savings_By_Functional_Area.xlsx not found.")
+        st.info("💡 Please upload the file using the sidebar or place it in the same directory as this script.")
         return pd.DataFrame()
     except Exception as e:
         st.error(f"❌ Error loading savings data: {str(e)}")
+        with st.expander("Show error details"):
+            st.exception(e)
         return pd.DataFrame()
 
 # Load both datasets with loading indicator
 with st.spinner("🔄 Loading dashboard data..."):
-    df = load_rpa_data()
-    savings_df = load_savings_data()
+    df = load_rpa_data(uploaded_rpa)
+    savings_df = load_savings_data(uploaded_savings)
 
 # Check if data loaded successfully
-if df.empty or savings_df.empty:
+if df.empty:
+    st.error("❌ RPA data failed to load. Please check the file and try again.")
     st.stop()
 
-# Extract total savings from savings file
-savings_data = savings_df[savings_df['Functional Area'] != 'Total'].copy()
-total_savings_row = savings_df[savings_df['Functional Area'] == 'Total'].iloc[0]
-TOTAL_CUMULATIVE_SAVINGS = total_savings_row['Cumulative Savings in USD']
+if savings_df.empty:
+    st.error("❌ Savings data failed to load. Please check the file and try again.")
+    st.stop()
+
+# Debug: Show data preview
+with st.expander("🔍 Debug: View Raw Data Preview"):
+    st.write("**RPA Data Preview:**")
+    st.dataframe(df.head(3), use_container_width=True)
+    st.write(f"Shape: {df.shape[0]} rows × {df.shape[1]} columns")
+    
+    st.write("**Savings Data Preview:**")
+    st.dataframe(savings_df.head(3), use_container_width=True)
+    st.write(f"Shape: {savings_df.shape[0]} rows × {savings_df.shape[1]} columns")
+
+# Extract total savings from savings file with error handling
+try:
+    savings_data = savings_df[savings_df['Functional Area'] != 'Total'].copy()
+    
+    # Check if 'Total' row exists
+    total_rows = savings_df[savings_df['Functional Area'] == 'Total']
+    if total_rows.empty:
+        st.warning("⚠️ No 'Total' row found in savings data. Using sum of all areas.")
+        # Create a synthetic total row
+        total_savings_row = pd.Series({
+            'Functional Area': 'Total',
+            'Cumulative Savings in USD': savings_data['Cumulative Savings in USD'].sum(),
+            'Savings 2025': savings_data['Savings 2025'].sum(),
+            'Projected Savings 2026': savings_data['Projected Savings 2026'].sum()
+        })
+    else:
+        total_savings_row = total_rows.iloc[0]
+    
+    TOTAL_CUMULATIVE_SAVINGS = total_savings_row['Cumulative Savings in USD']
+    
+except KeyError as e:
+    st.error(f"❌ Missing expected column in savings data: {str(e)}")
+    st.info(f"Available columns: {savings_df.columns.tolist()}")
+    st.stop()
+except Exception as e:
+    st.error(f"❌ Error processing savings data: {str(e)}")
+    st.exception(e)
+    st.stop()
 
 # ============================================================================
 # SIDEBAR FILTERS
